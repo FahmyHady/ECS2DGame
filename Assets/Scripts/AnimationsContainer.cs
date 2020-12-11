@@ -1,37 +1,51 @@
 ﻿
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.ComponentModel;
-using Unity.Entities;
-using UnityEditor.PackageManager;
 using UnityEngine;
 
 [System.Serializable]
 public class AnimationSheet
 {
-    public Texture[] animationTextures;
+    public float widthForResizing;
+    public float heightForResizing;
+    public int totalFrameCount;
     public int animationFps;
+    public int xZeroOffset;
+    public int yZeroOffset;
     public bool looping;
     public bool hasTrigger;
     public int triggerFrame;
 }
 public class AnimationsContainer : Singleton<AnimationsContainer>
 {
+    public Camera cameraToUse;
+
+
+
+    public Vector2 totalStepsXY;
     public Material playerMaterial;
     [Header("Player Animations Data")]
     public AnimationSheet player_IdleAnimationSheet = new AnimationSheet();
     public AnimationSheet player_StaffAttackAnimationSheet = new AnimationSheet();
-    public AnimationSheet player_HitAnimationSheet = new AnimationSheet();
+    public AnimationSheet player_SpecialAttackAnimationSheet = new AnimationSheet();
     public AnimationSheet player_DeathAnimationSheet = new AnimationSheet();
 
-    [Header("Basic Enemy Animations Data")]
+    [Header("Spitter Animations Data")]
     public AnimationSheet enemyOne_IdleAnimationSheet = new AnimationSheet();
     public AnimationSheet enemyOne_BasicAttackAnimationSheet = new AnimationSheet();
-    public AnimationSheet enemyOne_HitAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyOne_WalkAnimationSheet = new AnimationSheet();
     public AnimationSheet enemyOne_DeathAnimationSheet = new AnimationSheet();
+    [Header("Chomper Animations Data")]
+    public AnimationSheet enemyTwo_IdleAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyTwo_BasicAttackAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyTwo_WalkAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyTwo_DeathAnimationSheet = new AnimationSheet();
+    
+    [Header("Gunner Animations Data")]
+    public AnimationSheet enemyThree_IdleAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyThree_BasicAttackAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyThree_WalkAnimationSheet = new AnimationSheet();
+    public AnimationSheet enemyThree_DeathAnimationSheet = new AnimationSheet();
     [Header("Effects Animations Data")]
-    public AnimationSheet basicAttackEffect = new AnimationSheet();
+    public AnimationSheet smallExplosionEffect = new AnimationSheet();
     public Mesh quad;
     public float scaleTex = 3;
     private void Awake()
@@ -49,8 +63,17 @@ public class AnimationsContainer : Singleton<AnimationsContainer>
         }
         return null;
     }
+    public AnimationSheet GetAnimationSheet(EntityType entityType)
+    {
+        switch (entityType)
+        {
+            case EntityType.Effect:
+                return smallExplosionEffect;
+        }
+        return null;
+    }
 
-     AnimationSheet GetCharacterSheet(CharacterType characterType, CharacterState nextState)
+    AnimationSheet GetCharacterSheet(CharacterType characterType, CharacterState nextState)
     {
         if (characterType == CharacterType.Player)
         {
@@ -73,8 +96,8 @@ public class AnimationsContainer : Singleton<AnimationsContainer>
                 return player_IdleAnimationSheet;
             case CharacterState.Attacking:
                 return player_StaffAttackAnimationSheet;
-            case CharacterState.Hit:
-                return player_HitAnimationSheet;
+            case CharacterState.SpecialAttack:
+                return player_SpecialAttackAnimationSheet;
             case CharacterState.Dying:
                 return player_DeathAnimationSheet;
         }
@@ -87,7 +110,9 @@ public class AnimationsContainer : Singleton<AnimationsContainer>
             case CharacterType.EnemyOne:
                 return GetEnemyOneSheet(nextState);
             case CharacterType.EnemyTwo:
-                break;
+                return GetEnemyTwoSheet(nextState);
+            case CharacterType.EnemyThree:
+                return GetEnemyThreeSheet(nextState);
         }
         return null;
     }
@@ -97,13 +122,45 @@ public class AnimationsContainer : Singleton<AnimationsContainer>
         switch (nextState)
         {
             case CharacterState.Idle:
-                return enemyOne_IdleAnimationSheet;
+                return enemyOne_IdleAnimationSheet;     
+            case CharacterState.Walking:
+                return enemyOne_WalkAnimationSheet;
             case CharacterState.Attacking:
                 return enemyOne_BasicAttackAnimationSheet;
-            case CharacterState.Hit:
-                return enemyOne_HitAnimationSheet;
             case CharacterState.Dying:
                 return enemyOne_DeathAnimationSheet;
+
+        }
+        return null;
+    }
+    AnimationSheet GetEnemyTwoSheet(CharacterState nextState)
+    {
+        switch (nextState)
+        {
+            case CharacterState.Idle:
+                return enemyTwo_IdleAnimationSheet;
+            case CharacterState.Attacking:
+                return enemyTwo_BasicAttackAnimationSheet;
+            case CharacterState.Walking:
+                return enemyTwo_WalkAnimationSheet;
+            case CharacterState.Dying:
+                return enemyTwo_DeathAnimationSheet;
+
+        }
+        return null;
+    }
+    AnimationSheet GetEnemyThreeSheet(CharacterState nextState)
+    {
+        switch (nextState)
+        {
+            case CharacterState.Idle:
+                return enemyThree_IdleAnimationSheet;
+            case CharacterState.Attacking:
+                return enemyThree_BasicAttackAnimationSheet;
+            case CharacterState.Walking:
+                return enemyThree_WalkAnimationSheet;
+            case CharacterState.Dying:
+                return enemyThree_DeathAnimationSheet;
 
         }
         return null;

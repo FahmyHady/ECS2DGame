@@ -6,7 +6,8 @@ using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Rendering;
-
+[UpdateAfter(typeof(PlayerInputSystem))]
+[AlwaysUpdateSystem]
 public class AnimationStateUpdateSystem : SystemBase
 {
     AnimationsContainer container;
@@ -19,88 +20,135 @@ public class AnimationStateUpdateSystem : SystemBase
     }
     protected override void OnUpdate()
     {
-        bool attack = Input.GetKeyDown(KeyCode.Mouse0);
         var buffer = _EndSimulationEntityCommandBufferSystem.CreateCommandBuffer();
-        //If the current animation is marked as non looping this goes back to idle animations after RenderSystem says current animation is done
-        Entities.WithAll<BusyTag, CharacterTag>().ForEach((Entity entity, ref CharacterStateData characterStateData) =>
-        {
-            if (characterStateData.goBackToIdle)
-            {
-                buffer.RemoveComponent<BusyTag>(entity);
-                characterStateData.goBackToIdle = false;
-                characterStateData.animationStateConstant = false;
-                characterStateData.nextState = CharacterState.Idle;
-            }
-        }).Schedule();
-        //This checks the next animation state and sets the current state to it if it exists
-        Entities.WithAll<CharacterTag>().WithNone<BusyTag>().ForEach((Entity entity, ref EntityTypeData entityTypeData, ref AnimationData animationData, ref CharacterStateData characterStateData, ref ResizingData resizingData) =>
-       {
-           if (attack)
-           {
-               characterStateData.animationStateConstant = false;
-               characterStateData.nextState = CharacterState.Attacking;
-           }
-           if (!characterStateData.animationStateConstant)
-           {
-               characterStateData.animationStateConstant = true;
-               AnimationSheet sheetToCopy = container.GetAnimationSheet(entityTypeData.entityType, characterStateData.characterType, characterStateData.nextState);
-               AddBusyTag(characterStateData.nextState, entity, buffer);
-               CheckTriggerData(animationData, entity, buffer);
-               SetAnimationStateData(sheetToCopy, ref animationData, ref characterStateData);
-               SetResizingData(sheetToCopy.animationTextures[0].width, sheetToCopy.animationTextures[0].height, ref resizingData);
-           }
+        var bufferConcurrent = _EndSimulationEntityCommandBufferSystem.CreateCommandBuffer().ToConcurrent();
 
-       }).WithoutBurst().Run();
+        Entities.WithAll<NeedsIntializingTag>().ForEach((Entity entity, ref AnimationData animationData) =>
+        {
+            animationData.totalXSteps = (int)container.totalStepsXY.x;
+            animationData.totalYSteps = (int)container.totalStepsXY.y;
+            animationData.uvWidth = 1f / container.totalStepsXY.x;
+            animationData.uvHeight = 1f / container.totalStepsXY.y;
+            animationData.scalingFactor = container.scaleTex;
+            buffer.RemoveComponent<NeedsIntializingTag>(entity);
+        }).WithoutBurst().Run();
+
+
+
+
+
+        //If the current animation is marked as non looping this goes back to idle animations after RenderSystem says current animation is done
+
+        Entities.WithAll<AnimatedTag, CharacterTag>().WithNone<BusyTag, NeedsResizingTag>().ForEach((Entity entity, ref EntityTypeData entityTypeData, ref AnimationData animationData, ref CharacterStateData characterStateData) =>
+         {
+
+             if (!animationData.animationStateConstant)
+             {
+                 animationData.animationStateConstant = true;
+
+                 AnimationSheet sheetToCopy = container.GetAnimationSheet(entityTypeData.entityType, characterStateData.characterType, characterStateData.nextState);
+                 SetAnimationStateData(sheetToCopy, ref animationData, ref characterStateData);
+                 buffer.AddComponent<NeedsResizingTag>(entity);
+             }
+
+         }).WithoutBurst().Run();
+
+
+
+
+
+        Dependency = Entities.WithAll<AnimatedTag, BusyTag, CharacterTag>().ForEach((Entity entity, int entityInQueryIndex, ref AnimationData animationData, ref CharacterStateData characterStateData) =>
+     {
+         if (characterStateData.goBackToIdle)
+         {
+             bufferConcurrent.RemoveComponent<BusyTag>(entityInQueryIndex, entity);
+             characterStateData.goBackToIdle = false;
+             animationData.animationStateConstant = false;
+             characterStateData.nextState = CharacterState.Idle;
+         }
+     }).ScheduleParallel(Dependency);
+
+
+
+
+
+        Dependency = Entities.WithAll<AnimatedTag, DyingTag, CharacterTag>().ForEach((Entity entity, int entityInQueryIndex, ref AnimationData animationData, ref CharacterStateData characterStateData) =>
+     {
+         animationData.animationStateConstant = false;
+         characterStateData.nextState = CharacterState.Dying;
+     }).ScheduleParallel(Dependency);
+
+
+
+
+
+
+        //This checks the next animation state and sets the current state to it if it exists
+        Dependency = Entities.WithAll<AnimatedTag, NeedsResizingTag>().ForEach((Entity entity, int entityInQueryIndex, ref AnimationData animationData) =>
+          {
+              float xScale = animationData.widthForResizing * 1f / animationData.heightForResizing;
+              float scalingFactor = animationData.scalingFactor;
+
+              animationData.scale = new float3(xScale, 1, 1) * scalingFactor;
+              bufferConcurrent.RemoveComponent<NeedsResizingTag>(entityInQueryIndex, entity);
+              if (animationData.triggerData.hasTrigger)
+              {
+                  bufferConcurrent.AddComponent<TriggerTag>(entityInQueryIndex, entity);
+              }
+
+          }).ScheduleParallel(Dependency);
+
+
+
+
+
+
+        Dependency = Entities.WithAll<AnimatedTag>().WithNone<BusyTag>().ForEach((Entity entity, int entityInQueryIndex, ref CharacterStateData characterStateData) =>
+        {
+            switch (characterStateData.currentState)
+            {
+                case CharacterState.Idle:
+                    break;
+                case CharacterState.Attacking:
+                    bufferConcurrent.AddComponent<BusyTag>(entityInQueryIndex, entity);
+                    break;
+                case CharacterState.SpecialAttack:
+                    bufferConcurrent.AddComponent<BusyTag>(entityInQueryIndex, entity);
+                    break;
+                case CharacterState.Dying:
+                    bufferConcurrent.AddComponent<BusyTag>(entityInQueryIndex, entity);
+                    break;
+                case CharacterState.Walking:
+                    bufferConcurrent.AddComponent<BusyTag>(entityInQueryIndex, entity);
+                    break;
+                default:
+                    break;
+            }
+
+        }).ScheduleParallel(Dependency);
+        Dependency.Complete();
     }
 
 
     private void SetAnimationStateData(AnimationSheet sheetToCopy, ref AnimationData animationData, ref CharacterStateData characterStateData)
     {
         animationData.fps = sheetToCopy.animationFps;
-        animationData.totalFrames = sheetToCopy.animationTextures.Length;
-        animationData.currentFrame = 0;
+        animationData.totalFrames = sheetToCopy.totalFrameCount;
+        animationData.currentFrame = characterStateData.nextState == CharacterState.Idle ? UnityEngine.Random.Range(0, animationData.totalFrames) : 0;
         animationData.frameTimer = 0;
         animationData.maxFrameTime = 1f / sheetToCopy.animationFps;
         animationData.triggerData.hasTrigger = sheetToCopy.hasTrigger;
         animationData.triggerData.triggerFrame = sheetToCopy.triggerFrame;
-
+        animationData.xZeroOffset = sheetToCopy.xZeroOffset;
+        animationData.yZeroOffset = sheetToCopy.yZeroOffset;
+        animationData.widthForResizing = sheetToCopy.widthForResizing;
+        animationData.heightForResizing = sheetToCopy.heightForResizing;
         characterStateData.previousState = characterStateData.currentState;
         characterStateData.currentState = characterStateData.nextState;
 
-        characterStateData.nextState = CharacterState.None;
         animationData.looping = sheetToCopy.looping;
 
     }
 
-    private void SetResizingData(float width, float height, ref ResizingData resizingData)
-    {
-        //Add Resizing Data
-        resizingData.needsResizing = true;
-        resizingData.xScale = width * 1f / height;
-        resizingData.scalingFactor = container.scaleTex;
-    }
 
-
-    private void CheckTriggerData(AnimationData animationData, Entity entity, EntityCommandBuffer buffer)
-    {
-        if (animationData.triggerData.hasTrigger)
-        {
-            buffer.AddComponent<TriggerTag>(entity);
-        }
-    }
-    private void AddBusyTag(CharacterState nextState, Entity entity, EntityCommandBuffer buffer)
-    {
-        switch (nextState)
-        {
-            case CharacterState.Attacking:
-                buffer.AddComponent<BusyTag>(entity);
-                break;
-            case CharacterState.Hit:
-                buffer.AddComponent<BusyTag>(entity);
-                break;
-            case CharacterState.Dying:
-                buffer.AddComponent<BusyTag>(entity);
-                break;
-        }
-    }
 }
